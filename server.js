@@ -1,8 +1,9 @@
 /*
  * ISM DATA TECHNOLOGY ASSESSMENT - server
  *
- * Express + better-sqlite3. Everything that matters (timer, grading, duplicate
- * blocking) is decided on the server; the browser is never trusted and never
+ * Express + Postgres (on Vercel) or SQLite (on a laptop) - see db.js.
+ * Everything that matters (timer, grading, duplicate blocking) is decided on
+ * the server; the browser is never trusted and never
  * receives a correct answer.
  */
 
@@ -12,13 +13,13 @@ require('dotenv').config();
 
 const express = require('express');
 const cookieParser = require('cookie-parser');
-const Database = require('better-sqlite3');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 const questions = require('./questions');
+const db = require('./db');
 
 /* ------------------------------------------------------------------ *
  *  Config                                                             *
@@ -30,7 +31,6 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'ISM@admin2026';
 const DURATION_MINUTES = parseInt(process.env.DURATION_MINUTES || '60', 10);
 const DURATION_MS = DURATION_MINUTES * 60 * 1000;
 
-const DB_FILE = path.join(__dirname, 'assessment.db');
 const CSV_FILE = path.join(__dirname, 'results_backup.csv');
 
 const SESSION_COOKIE = 'ism_sid';
@@ -65,100 +65,59 @@ const HARD_TOTAL = questions.filter((q) => q.difficulty === 'hard').length;
 const TOTAL_MARKS = questions.length;
 
 /* ------------------------------------------------------------------ *
- *  Database                                                           *
+ *  Queries                                                            *
  * ------------------------------------------------------------------ */
 
-const db = new Database(DB_FILE);
-
-/* WAL keeps readers (the admin dashboard polling every 15s) from blocking the
- * writers (50 students autosaving). better-sqlite3 is synchronous, so writes
- * from concurrent requests are already serialised inside this process. */
-db.pragma('journal_mode = WAL');
-db.pragma('synchronous = FULL');
-db.pragma('busy_timeout = 5000');
-db.pragma('foreign_keys = ON');
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS candidates (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    name            TEXT    NOT NULL,
-    email           TEXT    NOT NULL,
-    email_key       TEXT    NOT NULL UNIQUE,
-    phone           TEXT    NOT NULL,
-    college         TEXT    NOT NULL,
-    degree          TEXT    NOT NULL,
-    year_of_study   TEXT    NOT NULL,
-    roll_no         TEXT    NOT NULL,
-    roll_key        TEXT    NOT NULL UNIQUE,
-    token           TEXT    NOT NULL UNIQUE,
-    question_order  TEXT    NOT NULL,
-    start_time      INTEGER NOT NULL,
-    submit_time     INTEGER,
-    status          TEXT    NOT NULL DEFAULT 'in progress',
-    tab_switches    INTEGER NOT NULL DEFAULT 0,
-    easy_score      INTEGER,
-    hard_score      INTEGER,
-    total_score     INTEGER,
-    percentage      REAL,
-    ip              TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS answers (
-    candidate_id  INTEGER NOT NULL,
-    question_id   INTEGER NOT NULL,
-    selected      INTEGER,
-    marked        INTEGER NOT NULL DEFAULT 0,
-    updated_at    INTEGER NOT NULL,
-    PRIMARY KEY (candidate_id, question_id),
-    FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_answers_candidate ON answers(candidate_id);
-  CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);
-`);
-
 const stmt = {
-  insertCandidate: db.prepare(`
-    INSERT INTO candidates
-      (name, email, email_key, phone, college, degree, year_of_study, roll_no, roll_key,
-       token, question_order, start_time, status, ip)
-    VALUES
-      (@name, @email, @email_key, @phone, @college, @degree, @year_of_study, @roll_no, @roll_key,
-       @token, @question_order, @start_time, 'in progress', @ip)
-  `),
-  byToken: db.prepare('SELECT * FROM candidates WHERE token = ?'),
-  byId: db.prepare('SELECT * FROM candidates WHERE id = ?'),
-  answersFor: db.prepare('SELECT question_id, selected, marked FROM answers WHERE candidate_id = ?'),
-  upsertAnswer: db.prepare(`
-    INSERT INTO answers (candidate_id, question_id, selected, marked, updated_at)
-    VALUES (@candidate_id, @question_id, @selected, @marked, @updated_at)
-    ON CONFLICT(candidate_id, question_id) DO UPDATE SET
-      selected = excluded.selected,
-      marked = excluded.marked,
-      updated_at = excluded.updated_at
-  `),
-  bumpTabSwitch: db.prepare(
-    "UPDATE candidates SET tab_switches = tab_switches + 1 WHERE id = ? AND status = 'in progress'"
+  insertCandidate: (r) => db.run(
+    `INSERT INTO candidates
+       (name, email, email_key, phone, college, degree, year_of_study, roll_no, roll_key,
+        token, question_order, start_time, status, ip)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'in progress', ?)`,
+    [r.name, r.email, r.email_key, r.phone, r.college, r.degree, r.year_of_study, r.roll_no,
+      r.roll_key, r.token, r.question_order, r.start_time, r.ip]
   ),
-  finish: db.prepare(`
-    UPDATE candidates
-       SET submit_time = @submit_time,
-           status = @status,
-           easy_score = @easy_score,
-           hard_score = @hard_score,
-           total_score = @total_score,
-           percentage = @percentage
-     WHERE id = @id AND status = 'in progress'
-  `),
-  expired: db.prepare(
-    "SELECT * FROM candidates WHERE status = 'in progress' AND start_time <= ?"
+  byToken: (token) => db.get('SELECT * FROM candidates WHERE token = ?', [token]),
+  byId: (id) => db.get('SELECT * FROM candidates WHERE id = ?', [id]),
+  byEmailOrRoll: (email, roll) => db.get(
+    'SELECT email_key, roll_key FROM candidates WHERE email_key = ? OR roll_key = ?', [email, roll]
   ),
-  setOrder: db.prepare('UPDATE candidates SET question_order = ? WHERE id = ?'),
-  allCandidates: db.prepare('SELECT * FROM candidates ORDER BY id DESC')
+  answersFor: (id) => db.all(
+    'SELECT question_id, selected, marked FROM answers WHERE candidate_id = ?', [id]
+  ),
+  answeredCount: async (id) => {
+    const row = await db.get(
+      'SELECT COUNT(*) AS n FROM answers WHERE candidate_id = ? AND selected IS NOT NULL', [id]
+    );
+    return Number(row.n);
+  },
+  upsertAnswer: (a) => db.run(
+    `INSERT INTO answers (candidate_id, question_id, selected, marked, updated_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (candidate_id, question_id) DO UPDATE SET
+       selected = excluded.selected,
+       marked = excluded.marked,
+       updated_at = excluded.updated_at`,
+    [a.candidate_id, a.question_id, a.selected, a.marked, a.updated_at]
+  ),
+  bumpTabSwitch: (id) => db.run(
+    "UPDATE candidates SET tab_switches = tab_switches + 1 WHERE id = ? AND status = 'in progress'", [id]
+  ),
+  finish: (f) => db.run(
+    `UPDATE candidates
+        SET submit_time = ?, status = ?, easy_score = ?, hard_score = ?, total_score = ?, percentage = ?
+      WHERE id = ? AND status = 'in progress'`,
+    [f.submit_time, f.status, f.easy_score, f.hard_score, f.total_score, f.percentage, f.id]
+  ),
+  expired: (cutoff) => db.all(
+    "SELECT id FROM candidates WHERE status = 'in progress' AND start_time <= ?", [cutoff]
+  ),
+  setOrder: (order, id) => db.run('UPDATE candidates SET question_order = ? WHERE id = ?', [order, id]),
+  allCandidates: () => db.all('SELECT * FROM candidates ORDER BY id DESC')
 };
 
 /* ------------------------------------------------------------------ *
- *  Helpers                                                            *
+ *  Helpers                                                          *
  * ------------------------------------------------------------------ */
 
 function shuffle(arr) {
@@ -186,8 +145,10 @@ const CSV_HEADER = [
 ];
 
 /* Every finished attempt is appended here as a plain-text safety net, so results
- * survive even if the database file is lost or corrupted. */
+ * survive even if the database file is lost or corrupted. Only for the local
+ * SQLite setup - on Vercel the disk is not writable and Postgres is the record. */
 function appendToCsvBackup(row) {
+  if (db.kind !== 'sqlite') return;
   try {
     if (!fs.existsSync(CSV_FILE)) {
       fs.writeFileSync(CSV_FILE, CSV_HEADER.map(csvCell).join(',') + '\n', 'utf8');
@@ -214,37 +175,34 @@ function remainingMs(candidate) {
  * than one place (manual submit, timer expiry, the sweeper) - the UPDATE only
  * matches rows still marked 'in progress', so the first caller wins.
  */
-function finishAttempt(candidateId, status) {
-  const result = db.transaction((id, finalStatus) => {
-    const candidate = stmt.byId.get(id);
-    if (!candidate || candidate.status !== 'in progress') return null;
+async function finishAttempt(candidateId, status) {
+  const candidate = await stmt.byId(candidateId);
+  if (!candidate || candidate.status !== 'in progress') return null;
 
-    const answers = stmt.answersFor.all(id);
-    let easy = 0;
-    let hard = 0;
+  const answers = await stmt.answersFor(candidateId);
+  let easy = 0;
+  let hard = 0;
 
-    for (const a of answers) {
-      const q = QUESTION_BY_ID.get(a.question_id);
-      if (!q || a.selected === null || a.selected !== q.answer) continue;
-      if (q.difficulty === 'easy') easy++;
-      else hard++;
-    }
+  for (const a of answers) {
+    const q = QUESTION_BY_ID.get(a.question_id);
+    if (!q || a.selected === null || a.selected !== q.answer) continue;
+    if (q.difficulty === 'easy') easy++;
+    else hard++;
+  }
 
-    const total = easy + hard;
-    const submitTime = Date.now();
-    const info = stmt.finish.run({
-      id,
-      submit_time: submitTime,
-      status: finalStatus,
-      easy_score: easy,
-      hard_score: hard,
-      total_score: total,
-      percentage: Math.round((total / TOTAL_MARKS) * 10000) / 100
-    });
+  const total = easy + hard;
+  const info = await stmt.finish({
+    id: candidateId,
+    submit_time: Date.now(),
+    status,
+    easy_score: easy,
+    hard_score: hard,
+    total_score: total,
+    percentage: Math.round((total / TOTAL_MARKS) * 10000) / 100
+  });
 
-    if (info.changes === 0) return null; // somebody else closed it first
-    return stmt.byId.get(id);
-  })(candidateId, status);
+  if (info.changes === 0) return null; // somebody else closed it first
+  const result = await stmt.byId(candidateId);
 
   if (result) {
     appendToCsvBackup({
@@ -259,18 +217,16 @@ function finishAttempt(candidateId, status) {
 }
 
 /* Closes attempts whose window ran out while the browser was offline/closed. */
-function sweepExpired() {
+async function sweepExpired() {
   try {
     const cutoff = Date.now() - DURATION_MS;
-    for (const c of stmt.expired.all(cutoff)) {
-      finishAttempt(c.id, 'auto-submitted');
+    for (const c of await stmt.expired(cutoff)) {
+      await finishAttempt(c.id, 'auto-submitted');
     }
   } catch (err) {
     console.error('[sweeper]', err.message);
   }
 }
-setInterval(sweepExpired, 10000).unref();
-sweepExpired();
 
 /* ------------------------------------------------------------------ *
  *  Validation                                                         *
@@ -339,43 +295,50 @@ function noStore(res) {
   res.set('Expires', '0');
 }
 
+/* Express 4 does not catch rejected promises, so async handlers go through this. */
+const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
 app.use('/api', (req, res, next) => {
   noStore(res);
   next();
 });
 
+// Creates the tables on the first request of each (serverless) instance.
+app.use(wrap(async (req, res, next) => {
+  await db.init();
+  next();
+}));
+
 /* Resolves the candidate behind the session cookie, auto-submitting first if
  * their 60 minutes elapsed while they were away. */
-function currentCandidate(req) {
+async function currentCandidate(req) {
   const token = req.cookies[SESSION_COOKIE];
   if (!token) return null;
-  let candidate = stmt.byToken.get(token);
+  let candidate = await stmt.byToken(token);
   if (!candidate) return null;
 
   if (candidate.status === 'in progress' && remainingMs(candidate) === 0) {
-    candidate = finishAttempt(candidate.id, 'auto-submitted') || stmt.byId.get(candidate.id);
+    candidate = (await finishAttempt(candidate.id, 'auto-submitted')) || (await stmt.byId(candidate.id));
   }
   return candidate;
 }
 
-function requireCandidate(req, res, next) {
-  const candidate = currentCandidate(req);
+const requireCandidate = wrap(async (req, res, next) => {
+  const candidate = await currentCandidate(req);
   if (!candidate) return res.status(401).json({ ok: false, error: 'No active session. Please register again.' });
   req.candidate = candidate;
   next();
-}
+});
 
 /* ---------------------------- registration ------------------------ */
 
-app.post('/api/register', (req, res) => {
+app.post('/api/register', wrap(async (req, res) => {
   const { errors, values } = validateRegistration(req.body || {});
   if (Object.keys(errors).length) {
     return res.status(400).json({ ok: false, errors });
   }
 
-  const existing = db
-    .prepare('SELECT email_key, roll_key FROM candidates WHERE email_key = ? OR roll_key = ?')
-    .get(values.email_key, values.roll_key);
+  const existing = await stmt.byEmailOrRoll(values.email_key, values.roll_key);
 
   if (existing) {
     const dupErrors = {};
@@ -394,10 +357,10 @@ app.post('/api/register', (req, res) => {
   };
 
   try {
-    stmt.insertCandidate.run(record);
+    await stmt.insertCandidate(record);
   } catch (err) {
     // The UNIQUE indexes catch the race where two tabs register at once.
-    if (String(err.message).includes('UNIQUE')) {
+    if (db.isUniqueViolation(err)) {
       return res.status(409).json({
         ok: false,
         errors: { email: 'This email or roll number has already been registered.' }
@@ -414,11 +377,11 @@ app.post('/api/register', (req, res) => {
   });
   console.log(`[register] ${record.name} (${record.roll_no}) <${record.email}>`);
   res.json({ ok: true, redirect: '/assessment' });
-});
+}));
 
 /* ---------------------------- assessment -------------------------- */
 
-app.get('/api/state', requireCandidate, (req, res) => {
+app.get('/api/state', requireCandidate, wrap(async (req, res) => {
   const c = req.candidate;
   if (c.status !== 'in progress') {
     return res.json({ ok: true, finished: true, redirect: '/thankyou' });
@@ -428,10 +391,10 @@ app.get('/api/state', requireCandidate, (req, res) => {
    * questions in the same sequence twice. Answers are keyed by question id,
    * not by position, so nothing already saved is disturbed. */
   const order = shuffle(questions.map((q) => q.id));
-  stmt.setOrder.run(JSON.stringify(order), c.id);
+  await stmt.setOrder(JSON.stringify(order), c.id);
 
   const saved = {};
-  for (const a of stmt.answersFor.all(c.id)) {
+  for (const a of await stmt.answersFor(c.id)) {
     saved[a.question_id] = { selected: a.selected, marked: !!a.marked };
   }
 
@@ -457,9 +420,9 @@ app.get('/api/state', requireCandidate, (req, res) => {
     questions: payload,
     answers: saved
   });
-});
+}));
 
-app.post('/api/answer', requireCandidate, (req, res) => {
+app.post('/api/answer', requireCandidate, wrap(async (req, res) => {
   const c = req.candidate;
   if (c.status !== 'in progress') {
     return res.status(409).json({ ok: false, finished: true, redirect: '/thankyou' });
@@ -479,7 +442,7 @@ app.post('/api/answer', requireCandidate, (req, res) => {
     }
   }
 
-  stmt.upsertAnswer.run({
+  await stmt.upsertAnswer({
     candidate_id: c.id,
     question_id: questionId,
     selected,
@@ -488,13 +451,13 @@ app.post('/api/answer', requireCandidate, (req, res) => {
   });
 
   res.json({ ok: true, remainingMs: remainingMs(c) });
-});
+}));
 
-app.post('/api/tab-switch', requireCandidate, (req, res) => {
-  stmt.bumpTabSwitch.run(req.candidate.id);
-  const updated = stmt.byId.get(req.candidate.id);
+app.post('/api/tab-switch', requireCandidate, wrap(async (req, res) => {
+  await stmt.bumpTabSwitch(req.candidate.id);
+  const updated = await stmt.byId(req.candidate.id);
   res.json({ ok: true, tabSwitches: updated ? updated.tab_switches : 0 });
-});
+}));
 
 app.get('/api/heartbeat', requireCandidate, (req, res) => {
   const c = req.candidate;
@@ -504,7 +467,7 @@ app.get('/api/heartbeat', requireCandidate, (req, res) => {
   res.json({ ok: true, finished: false, remainingMs: remainingMs(c) });
 });
 
-app.post('/api/submit', requireCandidate, (req, res) => {
+app.post('/api/submit', requireCandidate, wrap(async (req, res) => {
   const c = req.candidate;
   const status = req.body && req.body.auto ? 'auto-submitted' : 'submitted';
 
@@ -512,9 +475,9 @@ app.post('/api/submit', requireCandidate, (req, res) => {
     return res.json({ ok: true, alreadySubmitted: true, redirect: '/thankyou' });
   }
 
-  finishAttempt(c.id, status);
+  await finishAttempt(c.id, status);
   res.json({ ok: true, redirect: '/thankyou' });
-});
+}));
 
 /* ------------------------------- admin ---------------------------- */
 
@@ -581,10 +544,8 @@ app.post('/api/admin/logout', (req, res) => {
   res.json({ ok: true });
 });
 
-function candidateRow(c) {
-  const answered = db
-    .prepare('SELECT COUNT(*) AS n FROM answers WHERE candidate_id = ? AND selected IS NOT NULL')
-    .get(c.id).n;
+async function candidateRow(c) {
+  const answered = await stmt.answeredCount(c.id);
 
   return {
     id: c.id,
@@ -608,22 +569,24 @@ function candidateRow(c) {
   };
 }
 
-app.get('/api/admin/candidates', requireAdmin, (req, res) => {
-  sweepExpired();
-  const rows = stmt.allCandidates.all().map(candidateRow);
+app.get('/api/admin/candidates', requireAdmin, wrap(async (req, res) => {
+  await sweepExpired();
+  const rows = await Promise.all((await stmt.allCandidates()).map(candidateRow));
   res.json({
     ok: true,
     serverTime: Date.now(),
     totals: { easy: EASY_TOTAL, hard: HARD_TOTAL, total: TOTAL_MARKS },
     candidates: rows
   });
-});
+}));
 
-app.get('/api/admin/candidate/:id', requireAdmin, (req, res) => {
-  const c = stmt.byId.get(Number(req.params.id));
+app.get('/api/admin/candidate/:id', requireAdmin, wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(404).json({ ok: false, error: 'Candidate not found.' });
+  const c = await stmt.byId(id);
   if (!c) return res.status(404).json({ ok: false, error: 'Candidate not found.' });
 
-  const saved = new Map(stmt.answersFor.all(c.id).map((a) => [a.question_id, a]));
+  const saved = new Map((await stmt.answersFor(c.id)).map((a) => [a.question_id, a]));
 
   /* Reviewed in the canonical bank order, not the candidate's shuffled order -
    * the shuffle changes on every reload, so it is no basis for numbering. */
@@ -647,12 +610,12 @@ app.get('/api/admin/candidate/:id', requireAdmin, (req, res) => {
       };
     });
 
-  res.json({ ok: true, candidate: candidateRow(c), questions: detail });
-});
+  res.json({ ok: true, candidate: await candidateRow(c), questions: detail });
+}));
 
-app.get('/api/admin/export.csv', requireAdmin, (req, res) => {
-  sweepExpired();
-  const rows = stmt.allCandidates.all();
+app.get('/api/admin/export.csv', requireAdmin, wrap(async (req, res) => {
+  await sweepExpired();
+  const rows = await stmt.allCandidates();
   const lines = [CSV_HEADER.map(csvCell).join(',')];
 
   for (const c of rows) {
@@ -673,25 +636,25 @@ app.get('/api/admin/export.csv', requireAdmin, (req, res) => {
   res.set('Content-Type', 'text/csv; charset=utf-8');
   res.set('Content-Disposition', `attachment; filename="ism-assessment-results-${stamp}.csv"`);
   res.send('﻿' + lines.join('\n') + '\n'); // BOM so Excel reads UTF-8 correctly
-});
+}));
 
 /* ------------------------------- pages ---------------------------- */
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-app.get('/', (req, res) => {
-  const candidate = currentCandidate(req);
+app.get('/', wrap(async (req, res) => {
+  const candidate = await currentCandidate(req);
   if (candidate && candidate.status === 'in progress') return res.redirect('/assessment');
   res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
-});
+}));
 
-app.get('/assessment', (req, res) => {
+app.get('/assessment', wrap(async (req, res) => {
   noStore(res);
-  const candidate = currentCandidate(req);
+  const candidate = await currentCandidate(req);
   if (!candidate) return res.redirect('/');
   if (candidate.status !== 'in progress') return res.redirect('/thankyou');
   res.sendFile(path.join(PUBLIC_DIR, 'assessment.html'));
-});
+}));
 
 app.get('/thankyou', (req, res) => {
   noStore(res);
@@ -714,7 +677,10 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error('[error]', err);
   if (res.headersSent) return;
-  res.status(500).json({ ok: false, error: 'Server error. Please try again.' });
+  // Setup mistakes (no database connected) are shown as-is so they can be fixed.
+  const error = db.kind === 'none' ? err.message : 'Server error. Please try again.';
+  if (req.path.startsWith('/api/')) return res.status(500).json({ ok: false, error });
+  res.status(500).type('text').send(error);
 });
 
 /* ------------------------------- boot ----------------------------- */
@@ -730,50 +696,59 @@ function lanAddresses() {
   return out;
 }
 
-const server = app.listen(PORT, '0.0.0.0', () => {
-  const lans = lanAddresses();
-  const bar = '='.repeat(64);
-  console.log('\n' + bar);
-  console.log('  ISM DATA TECHNOLOGY ASSESSMENT');
-  console.log(bar);
-  console.log(`  Questions      : ${TOTAL_MARKS} (${EASY_TOTAL} easy + ${HARD_TOTAL} hard)`);
-  console.log(`  Duration       : ${DURATION_MINUTES} minutes (server enforced)`);
-  console.log(`  Database       : ${DB_FILE}`);
-  console.log(`  CSV backup     : ${CSV_FILE}`);
-  console.log('-'.repeat(64));
-  console.log(`  Local URL      : http://localhost:${PORT}/`);
-  if (lans.length) {
-    lans.forEach((l, i) => {
-      console.log(`  LAN URL   ${i === 0 ? '     ' : '     '}: http://${l.address}:${PORT}/   (${l.name})`);
-    });
-    console.log(`  Admin URL      : http://${lans[0].address}:${PORT}/admin`);
-  } else {
-    console.log('  LAN URL        : (no external IPv4 interface detected)');
-  }
-  console.log(`  Admin (local)  : http://localhost:${PORT}/admin`);
-  console.log(`  Admin username : ${ADMIN_USERNAME}`);
-  console.log(`  Admin password : ${ADMIN_PASSWORD}`);
-  if (!process.env.ADMIN_PASSWORD) {
-    console.log('  >> WARNING: using the built-in default password. Set ADMIN_PASSWORD in .env.');
-  }
-  console.log(bar + '\n');
-  console.log('  Share the LAN URL with candidates on the same Wi-Fi / network.');
-  console.log('  Press Ctrl+C to stop.\n');
-});
+/* On Vercel the app is imported by api/index.js and run as a function; only a
+ * direct `node server.js` starts a long-running server. */
+module.exports = app;
+if (require.main === module) startServer();
 
-function shutdown(signal) {
-  console.log(`\n[${signal}] shutting down, flushing database...`);
-  server.close(() => {
-    try {
-      db.pragma('wal_checkpoint(TRUNCATE)');
-      db.close();
-    } catch (_) {
-      /* already closed */
+function startServer() {
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    const lans = lanAddresses();
+    const bar = '='.repeat(64);
+    console.log('\n' + bar);
+    console.log('  ISM DATA TECHNOLOGY ASSESSMENT');
+    console.log(bar);
+    console.log(`  Questions      : ${TOTAL_MARKS} (${EASY_TOTAL} easy + ${HARD_TOTAL} hard)`);
+    console.log(`  Duration       : ${DURATION_MINUTES} minutes (server enforced)`);
+    console.log(`  Database       : ${db.kind} - ${db.location}`);
+    if (db.kind === 'sqlite') console.log(`  CSV backup     : ${CSV_FILE}`);
+    console.log('-'.repeat(64));
+    console.log(`  Local URL      : http://localhost:${PORT}/`);
+    if (lans.length) {
+      lans.forEach((l, i) => {
+        console.log(`  LAN URL   ${i === 0 ? '     ' : '     '}: http://${l.address}:${PORT}/   (${l.name})`);
+      });
+      console.log(`  Admin URL      : http://${lans[0].address}:${PORT}/admin`);
+    } else {
+      console.log('  LAN URL        : (no external IPv4 interface detected)');
     }
-    process.exit(0);
+    console.log(`  Admin (local)  : http://localhost:${PORT}/admin`);
+    console.log(`  Admin username : ${ADMIN_USERNAME}`);
+    console.log(`  Admin password : ${ADMIN_PASSWORD}`);
+    if (!process.env.ADMIN_PASSWORD) {
+      console.log('  >> WARNING: using the built-in default password. Set ADMIN_PASSWORD in .env.');
+    }
+    console.log(bar + '\n');
+    console.log('  Share the LAN URL with candidates on the same Wi-Fi / network.');
+    console.log('  Press Ctrl+C to stop.\n');
   });
-  setTimeout(() => process.exit(0), 3000).unref();
-}
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+  function shutdown(signal) {
+    console.log(`\n[${signal}] shutting down, flushing database...`);
+    server.close(async () => {
+      try {
+        await db.close();
+      } catch (_) {
+        /* already closed */
+      }
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(0), 3000).unref();
+  }
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+  setInterval(sweepExpired, 10000).unref();
+  db.init().then(sweepExpired).catch((err) => console.error('[db]', err.message));
+}

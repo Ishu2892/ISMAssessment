@@ -3,7 +3,8 @@
 A self-contained online assessment platform for UG campus recruitment.
 50 MCQs (20 easy + 30 hard), 60-minute server-enforced timer, live admin dashboard.
 
-No build step, no external services — Node.js + Express + SQLite + plain HTML/CSS/JS.
+No build step — Node.js + Express + plain HTML/CSS/JS. Runs on a laptop with SQLite, or on
+Vercel with a Postgres database.
 
 ---
 
@@ -37,8 +38,23 @@ ADMIN_PASSWORD=pick-your-own
 DURATION_MINUTES=60
 ```
 
-Change `ADMIN_USERNAME` and `ADMIN_PASSWORD` before a real drive. On Vercel, set them under
-Project → Settings → Environment Variables and redeploy (`.env` is not uploaded).
+Change `ADMIN_USERNAME` and `ADMIN_PASSWORD` before a real drive.
+
+## Deploy on Vercel
+
+A Vercel deployment has no writable disk, so results go to Postgres instead of SQLite.
+`vercel.json` sends every request that is not a file in `public/` to `api/index.js`,
+which runs the same Express app.
+
+1. In the Vercel project, open **Storage → Create Database → Neon (Postgres)** and connect
+   it to the project. This sets `DATABASE_URL`; the tables are created on first use.
+2. Under **Settings → Environment Variables**, add `ADMIN_USERNAME` and `ADMIN_PASSWORD`
+   (`.env` is not uploaded).
+3. Redeploy. Admin is at `https://<your-project>.vercel.app/admin`.
+
+Without `DATABASE_URL` the deployed pages show *"No database configured"* instead of
+failing silently. On Vercel there is no background sweeper; expired attempts are closed
+the next time the candidate or the admin dashboard makes a request.
 
 ## How the exam works
 
@@ -83,8 +99,8 @@ count and status.
 
 | File | Purpose |
 | --- | --- |
-| `assessment.db` | SQLite database (candidates + answers). Created on first run. |
-| `results_backup.csv` | Every completed attempt is also appended here as a plain-text safety net. |
+| `assessment.db` | SQLite database (candidates + answers). Created on first run. Local only. |
+| `results_backup.csv` | Every completed attempt is also appended here as a plain-text safety net. Local only. |
 
 SQLite runs in WAL mode with `synchronous = FULL`, so the admin dashboard can read while
 50 candidates write, and a committed answer survives a crash. `better-sqlite3` is
@@ -119,8 +135,11 @@ options each, answer index in range) and refuses to start if anything is off.
 
 ```
 ism-assessment/
-├── server.js            Express app, SQLite, grading, admin API
+├── server.js            Express app, grading, admin API
+├── db.js                Storage: Postgres when DATABASE_URL is set, otherwise SQLite
 ├── questions.js         The 50-question bank (correct answers live here only)
+├── api/index.js         Vercel entry point (runs server.js as a function)
+├── vercel.json          Vercel routing
 ├── package.json
 ├── .env
 └── public/
