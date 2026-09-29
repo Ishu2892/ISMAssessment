@@ -13,6 +13,7 @@
     loginView: document.getElementById('loginView'),
     dashView: document.getElementById('dashView'),
     loginForm: document.getElementById('loginForm'),
+    user: document.getElementById('user'),
     pwd: document.getElementById('pwd'),
     loginErr: document.getElementById('loginErr'),
     stats: document.getElementById('stats'),
@@ -70,15 +71,18 @@
     fetch('/api/admin/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: el.pwd.value })
+      body: JSON.stringify({ username: el.user.value, password: el.pwd.value })
     })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (d && d.ok) {
           el.pwd.value = '';
+          el.user.classList.remove('bad');
+          el.pwd.classList.remove('bad');
           showDashboard();
         } else {
-          el.loginErr.textContent = (d && d.error) || 'Incorrect password.';
+          el.loginErr.textContent = (d && d.error) || 'Incorrect username or password.';
+          el.user.classList.add('bad');
           el.pwd.classList.add('bad');
         }
       })

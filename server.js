@@ -25,6 +25,7 @@ const questions = require('./questions');
  * ------------------------------------------------------------------ */
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'ISM@admin2026';
 const DURATION_MINUTES = parseInt(process.env.DURATION_MINUTES || '60', 10);
 const DURATION_MS = DURATION_MINUTES * 60 * 1000;
@@ -517,36 +518,65 @@ app.post('/api/submit', requireCandidate, (req, res) => {
 
 /* ------------------------------- admin ---------------------------- */
 
-const adminTokens = new Set();
+const ADMIN_SESSION_MS = 12 * 60 * 60 * 1000;
+
+/* Admin tokens are signed rather than stored in memory, so they stay valid
+ * across serverless instances (Vercel) and server restarts. The key is derived
+ * from the credentials, so changing the password signs everyone out. */
+const ADMIN_SIGNING_KEY = crypto
+  .createHash('sha256')
+  .update('ism-admin:' + ADMIN_USERNAME + ':' + ADMIN_PASSWORD)
+  .digest();
+
+function signAdminToken(expires) {
+  return crypto.createHmac('sha256', ADMIN_SIGNING_KEY).update(String(expires)).digest('hex');
+}
+
+// Constant-time compare so secrets cannot be probed byte by byte.
+function safeEqual(supplied, expected) {
+  const a = Buffer.from(String(supplied));
+  const b = Buffer.from(String(expected));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function isValidAdminToken(token) {
+  const [expires, sig] = String(token || '').split('.');
+  if (!expires || !sig || !/^\d+$/.test(expires)) return false;
+  if (Number(expires) < Date.now()) return false;
+  return safeEqual(sig, signAdminToken(expires));
+}
 
 function requireAdmin(req, res, next) {
-  const token = req.cookies[ADMIN_COOKIE];
-  if (!token || !adminTokens.has(token)) {
+  if (!isValidAdminToken(req.cookies[ADMIN_COOKIE])) {
     return res.status(401).json({ ok: false, error: 'Not authorised.' });
   }
   next();
 }
 
 app.post('/api/admin/login', (req, res) => {
-  const supplied = String((req.body && req.body.password) || '');
-  const expected = ADMIN_PASSWORD;
+  const username = String((req.body && req.body.username) || '').trim();
+  const password = String((req.body && req.body.password) || '');
 
-  // Constant-time compare so the password cannot be probed byte by byte.
-  const a = Buffer.from(supplied);
-  const b = Buffer.from(expected);
-  const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
+  // Evaluate both so the response time does not reveal which one was wrong.
+  const userOk = safeEqual(username.toLowerCase(), ADMIN_USERNAME.toLowerCase());
+  const passOk = safeEqual(password, ADMIN_PASSWORD);
 
-  if (!ok) return res.status(401).json({ ok: false, error: 'Incorrect password.' });
+  if (!(userOk && passOk)) {
+    return res.status(401).json({ ok: false, error: 'Incorrect username or password.' });
+  }
 
-  const token = newToken();
-  adminTokens.add(token);
-  res.cookie(ADMIN_COOKIE, token, { httpOnly: true, sameSite: 'lax', maxAge: 12 * 60 * 60 * 1000 });
+  const expires = Date.now() + ADMIN_SESSION_MS;
+  const token = expires + '.' + signAdminToken(expires);
+  res.cookie(ADMIN_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
+    maxAge: ADMIN_SESSION_MS
+  });
   res.json({ ok: true });
 });
 
 app.post('/api/admin/logout', (req, res) => {
-  const token = req.cookies[ADMIN_COOKIE];
-  if (token) adminTokens.delete(token);
   res.clearCookie(ADMIN_COOKIE);
   res.json({ ok: true });
 });
@@ -721,6 +751,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     console.log('  LAN URL        : (no external IPv4 interface detected)');
   }
   console.log(`  Admin (local)  : http://localhost:${PORT}/admin`);
+  console.log(`  Admin username : ${ADMIN_USERNAME}`);
   console.log(`  Admin password : ${ADMIN_PASSWORD}`);
   if (!process.env.ADMIN_PASSWORD) {
     console.log('  >> WARNING: using the built-in default password. Set ADMIN_PASSWORD in .env.');

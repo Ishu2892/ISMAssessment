@@ -32,11 +32,13 @@ cannot reach the server.
 
 ```
 PORT=3000
+ADMIN_USERNAME=admin
 ADMIN_PASSWORD=pick-your-own
 DURATION_MINUTES=60
 ```
 
-Change `ADMIN_PASSWORD` before a real drive.
+Change `ADMIN_USERNAME` and `ADMIN_PASSWORD` before a real drive. On Vercel, set them under
+Project → Settings → Environment Variables and redeploy (`.env` is not uploaded).
 
 ## How the exam works
 
@@ -67,7 +69,7 @@ question area, and every tab or window switch is counted and stored in the datab
 
 ## Admin dashboard
 
-Sign in at `/admin` with the password from `.env`. The table auto-refreshes every 15
+Sign in at `/admin` with the username and password from `.env` (default username `admin`). The table auto-refreshes every 15
 seconds and shows name, email, phone, college, degree, year, roll no, start and submit
 time, time taken, easy score /20, hard score /30, total /50, percentage, tab-switch
 count and status.
