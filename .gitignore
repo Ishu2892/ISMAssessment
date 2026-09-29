@@ -1,0 +1,15 @@
+# secrets
+.env
+.env.local
+
+# runtime data - never commit candidate results
+assessment.db
+assessment.db-wal
+assessment.db-shm
+results_backup.csv
+
+# deps & tooling
+node_modules/
+.vercel/
+npm-debug.log*
+.DS_Store

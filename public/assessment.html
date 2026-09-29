@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Assessment in progress &middot; ISM DATA TECHNOLOGY ASSESSMENT</title>
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📘</text></svg>">
+</head>
+<body class="noselect">
+
+  <div class="exam-bar">
+    <span class="title">ISM DATA TECHNOLOGY ASSESSMENT</span>
+    <span class="who" id="who"></span>
+    <span class="spacer"></span>
+    <span class="saving" id="saveState">All answers saved</span>
+    <span class="timer" id="timer">--:--</span>
+  </div>
+
+  <div id="loading" style="padding:60px 20px; text-align:center; color:#5b6b80;">
+    Loading your question paper…
+  </div>
+
+  <div class="exam-layout" id="examLayout" style="display:none;">
+
+    <main class="card" id="qcard">
+      <div class="qhead">
+        <span class="qnum" id="qnum">Question 1 of 50</span>
+        <span class="tag" id="qtag">easy</span>
+        <span class="tag mk" id="qmarked" style="display:none;">Marked for review</span>
+      </div>
+
+      <div class="qtext" id="qtext"></div>
+      <pre class="code" id="qcode" style="display:none;"></pre>
+
+      <div class="opts" id="opts"></div>
+
+      <div class="navbtns">
+        <button class="btn ghost" id="prevBtn" type="button">&larr; Previous</button>
+        <button class="btn ghost" id="clearBtn" type="button">Clear answer</button>
+        <button class="btn warn" id="markBtn" type="button">Mark for review</button>
+        <span class="spacer"></span>
+        <button class="btn" id="nextBtn" type="button">Next &rarr;</button>
+      </div>
+    </main>
+
+    <aside class="card panel">
+      <h3>Question navigator</h3>
+      <div class="qgrid" id="qgrid"></div>
+
+      <div class="legend">
+        <span><i class="a"></i> Answered</span>
+        <span><i class="m"></i> Marked for review</span>
+        <span><i></i> Not answered</span>
+      </div>
+
+      <div class="counts">
+        <div>Answered: <b id="cAns">0</b> / <span id="cTotal">50</span></div>
+        <div>Not answered: <b id="cUnans">50</b></div>
+        <div>Marked for review: <b id="cMark">0</b></div>
+        <div>Tab switches: <b id="cTabs">0</b></div>
+      </div>
+
+      <button class="btn danger" id="submitBtn" type="button" style="width:100%; margin-top:16px;">
+        Submit assessment
+      </button>
+    </aside>
+
+  </div>
+
+  <!-- submit confirmation -->
+  <div class="overlay" id="confirmOverlay" style="display:none;">
+    <div class="modal">
+      <h2>Submit your assessment?</h2>
+      <div id="confirmSummary"></div>
+      <div class="note warn" style="margin-top:14px;">
+        Once submitted you cannot return to the paper or change any answer.
+      </div>
+      <div class="actions">
+        <button class="btn ghost" id="cancelSubmit" type="button">Keep working</button>
+        <button class="btn danger" id="confirmSubmit" type="button">Yes, submit now</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- time-up notice -->
+  <div class="overlay" id="timeupOverlay" style="display:none;">
+    <div class="modal">
+      <h2>Time is up</h2>
+      <p class="lead" style="margin:0;">Your assessment is being submitted automatically…</p>
+    </div>
+  </div>
+
+  <script src="/js/assessment.js"></script>
+</body>
+</html>

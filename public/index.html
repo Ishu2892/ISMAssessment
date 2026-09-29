@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ISM DATA TECHNOLOGY ASSESSMENT</title>
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📘</text></svg>">
+</head>
+<body>
+
+  <header class="banner">
+    <span class="mark">ISM Data Technology</span>
+    <h1>ISM DATA TECHNOLOGY ASSESSMENT</h1>
+    <p>Undergraduate Campus Recruitment &middot; Technical Aptitude Round</p>
+  </header>
+
+  <main class="wrap">
+
+    <section class="card">
+      <h2>Before you begin</h2>
+      <ul class="rules">
+        <li><strong>50 multiple-choice questions.</strong></li>
+        <li><strong>60 minutes.</strong> The timer starts the moment you register and runs on our server, so refreshing the page will not give you extra time.</li>
+        <li>Your answers are saved automatically as you go. If your connection drops, reopen the link and carry on.</li>
+        <li>You may move freely between questions and mark any question for review.</li>
+        <li>Stay on this tab. Switching tabs or windows is recorded.</li>
+        <li>Each email address and roll number may attempt the assessment <strong>once only</strong>.</li>
+        <li>The paper auto-submits when the 60 minutes are up.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Candidate registration</h2>
+      <p class="lead">All fields are required. Please check your details &mdash; they cannot be changed later.</p>
+
+      <div id="formError" class="note bad" style="display:none; margin-bottom:18px;"></div>
+
+      <form id="regForm" novalidate autocomplete="on">
+        <div class="grid">
+
+          <div class="field full">
+            <label for="name">Full name <span class="req">*</span></label>
+            <input id="name" name="name" type="text" maxlength="80" placeholder="e.g. Ishwarya Lakshmi" required>
+            <div class="err" data-err="name"></div>
+          </div>
+
+          <div class="field">
+            <label for="email">Email address <span class="req">*</span></label>
+            <input id="email" name="email" type="email" maxlength="120" placeholder="you@example.com" required>
+            <div class="err" data-err="email"></div>
+          </div>
+
+          <div class="field">
+            <label for="phone">Phone number <span class="req">*</span></label>
+            <input id="phone" name="phone" type="tel" inputmode="numeric" maxlength="10" placeholder="10 digits" required>
+            <div class="err" data-err="phone"></div>
+          </div>
+
+          <div class="field full">
+            <label for="college">College name <span class="req">*</span></label>
+            <input id="college" name="college" type="text" maxlength="120" placeholder="e.g. Anna University, CEG Campus" required>
+            <div class="err" data-err="college"></div>
+          </div>
+
+          <div class="field">
+            <label for="degree">Degree &amp; branch <span class="req">*</span></label>
+            <input id="degree" name="degree" type="text" maxlength="120" placeholder="e.g. B.E. Computer Science" required>
+            <div class="err" data-err="degree"></div>
+          </div>
+
+          <div class="field">
+            <label for="year">Year of study <span class="req">*</span></label>
+            <select id="year" name="year" required>
+              <option value="">Select year</option>
+              <option value="1">1st year</option>
+              <option value="2">2nd year</option>
+              <option value="3">3rd year</option>
+              <option value="4">4th year</option>
+              <option value="5">5th year</option>
+            </select>
+            <div class="err" data-err="year"></div>
+          </div>
+
+          <div class="field full">
+            <label for="roll">Register / roll number <span class="req">*</span></label>
+            <input id="roll" name="roll" type="text" maxlength="40" placeholder="e.g. 2021CSE045" required style="text-transform:uppercase">
+            <div class="err" data-err="roll"></div>
+          </div>
+
+        </div>
+
+        <div class="note info" style="margin:20px 0 18px;">
+          By starting the assessment you confirm that you will complete it on your own,
+          without any assistance or reference material.
+        </div>
+
+        <button class="btn lg" id="startBtn" type="submit">Start assessment &rarr;</button>
+      </form>
+    </section>
+
+  </main>
+
+  <script src="/js/entry.js"></script>
+</body>
+</html>

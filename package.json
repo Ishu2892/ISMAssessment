@@ -1,0 +1,19 @@
+{
+  "name": "ism-data-technology-assessment",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ISM DATA TECHNOLOGY ASSESSMENT - online MCQ assessment platform for UG candidates",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

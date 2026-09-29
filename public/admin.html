@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin &middot; ISM DATA TECHNOLOGY ASSESSMENT</title>
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+</head>
+<body>
+
+  <!-- login -->
+  <div id="loginView" class="center-screen">
+    <div class="card" style="max-width:400px; width:100%;">
+      <h2>Administrator access</h2>
+      <p class="lead">ISM Data Technology Assessment &mdash; results dashboard.</p>
+      <form id="loginForm">
+        <div class="field">
+          <label for="pwd">Password</label>
+          <input id="pwd" type="password" autocomplete="current-password" required>
+          <div class="err" id="loginErr"></div>
+        </div>
+        <button class="btn lg" type="submit" style="margin-top:8px;">Sign in</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- dashboard -->
+  <div id="dashView" style="display:none;">
+    <div class="admin-top">
+      <h1>ISM DATA TECHNOLOGY ASSESSMENT &mdash; Results</h1>
+      <span class="spacer"></span>
+      <span class="live" id="liveStamp">&nbsp;</span>
+      <button class="btn ghost" id="refreshBtn" type="button">Refresh</button>
+      <button class="btn" id="exportBtn" type="button">Download CSV / Excel</button>
+      <button class="btn ghost" id="logoutBtn" type="button">Sign out</button>
+    </div>
+
+    <div class="admin-wrap">
+
+      <div class="stats" id="stats"></div>
+
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Search by name, roll number, email or college…">
+        <select id="statusFilter" style="max-width:210px;">
+          <option value="">All statuses</option>
+          <option value="in progress">In progress</option>
+          <option value="submitted">Submitted</option>
+          <option value="auto-submitted">Auto-submitted</option>
+        </select>
+        <span class="live" id="rowCount" style="color:#5b6b80;"></span>
+      </div>
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr id="headRow">
+              <th class="sortable" data-key="id">#</th>
+              <th class="sortable" data-key="name">Name</th>
+              <th class="sortable" data-key="roll_no">Roll no</th>
+              <th class="sortable" data-key="email">Email</th>
+              <th class="sortable" data-key="phone">Phone</th>
+              <th class="sortable" data-key="college">College</th>
+              <th class="sortable" data-key="degree">Degree &amp; branch</th>
+              <th class="sortable" data-key="year_of_study">Year</th>
+              <th class="sortable" data-key="start_time">Started</th>
+              <th class="sortable" data-key="submit_time">Submitted</th>
+              <th class="sortable" data-key="time_taken_seconds">Time taken</th>
+              <th class="sortable" data-key="easy_score">Easy /20</th>
+              <th class="sortable" data-key="hard_score">Hard /30</th>
+              <th class="sortable" data-key="total_score">Total /50</th>
+              <th class="sortable" data-key="percentage">%</th>
+              <th class="sortable" data-key="tab_switches">Tab switches</th>
+              <th class="sortable" data-key="status">Status</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <div class="empty" id="emptyState" style="display:none;">No candidates yet.</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- per-candidate answer review -->
+  <div class="overlay" id="detailOverlay" style="display:none;">
+    <div class="modal wide">
+      <div style="display:flex; align-items:flex-start; gap:12px;">
+        <div style="flex:1 1 auto;">
+          <h2 id="detailName">Candidate</h2>
+          <div class="lead" id="detailMeta"></div>
+        </div>
+        <button class="btn ghost" id="closeDetail" type="button">Close</button>
+      </div>
+      <div id="detailBody"></div>
+    </div>
+  </div>
+
+  <script src="/js/admin.js"></script>
+</body>
+</html>
