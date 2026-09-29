@@ -13,7 +13,21 @@
 
 const path = require('path');
 
-const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
+/* Vercel's Neon integration names the variable DATABASE_URL, but a custom prefix
+ * turns it into e.g. STORAGE_DATABASE_URL or NEON_POSTGRES_URL. Accept any
+ * variable holding a postgres:// URL, preferring the pooled ones. */
+function findDatabaseUrl() {
+  const isPg = (v) => /^postgres(ql)?:\/\//i.test(String(v || '').trim());
+  const preferred = ['DATABASE_URL', 'POSTGRES_URL', 'POSTGRES_PRISMA_URL'];
+  for (const name of preferred) if (isPg(process.env[name])) return process.env[name].trim();
+
+  const names = Object.keys(process.env).filter((n) => isPg(process.env[n]));
+  const rank = (n) => (/UNPOOLED|NON_POOLING|DIRECT/i.test(n) ? 2 : /DATABASE_URL|POSTGRES_URL$/i.test(n) ? 0 : 1);
+  names.sort((a, b) => rank(a) - rank(b));
+  return names.length ? process.env[names[0]].trim() : '';
+}
+
+const DATABASE_URL = findDatabaseUrl();
 
 const SCHEMA_PG = `
   CREATE TABLE IF NOT EXISTS candidates (
@@ -173,10 +187,15 @@ function createSqlite() {
 /* On Vercel the disk is read-only and wiped between requests, so SQLite cannot
  * work there. Fail with a clear message instead of a confusing crash. */
 function createMissing() {
+  // Names only (never values), so the message can be shown and shared safely.
+  const seen = Object.keys(process.env)
+    .filter((n) => /DATABASE|POSTGRES|NEON|PG/i.test(n))
+    .sort();
   const fail = async () => {
     throw new Error(
       'No database configured. In Vercel, open the project -> Storage -> connect a Neon ' +
-      'Postgres database (it sets DATABASE_URL), then redeploy.'
+      'Postgres database to this project (all environments), then redeploy. ' +
+      'Database-related variables this deployment can see: ' + (seen.length ? seen.join(', ') : 'none') + '.'
     );
   };
   return { kind: 'none', location: '(not configured)', init: fail, all: fail, get: fail, run: fail,
